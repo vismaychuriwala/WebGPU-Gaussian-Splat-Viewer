@@ -67,13 +67,6 @@ export default function get_renderer(
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
   );
 
-  // const preprocess_dispatch_buffer = createBuffer(
-  //   device,
-  //   'preprocess sort dispatch scratch',
-  //   4 * Uint32Array.BYTES_PER_ELEMENT,
-  //   GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  //   new Uint32Array(4)
-  // );
   // ===============================================
   //    Create Compute Pipeline and Bind Groups
   // ===============================================
@@ -92,16 +85,16 @@ export default function get_renderer(
 
   const preprocess_workgroup_count = Math.ceil(pc.num_points / C.histogram_wg_size);
 
-  // const sort_bind_group = device.createBindGroup({
-  //   label: 'sort',
-  //   layout: preprocess_pipeline.getBindGroupLayout(2),
-  //   entries: [
-  //     { binding: 0, resource: { buffer: sorter.sort_info_buffer } },
-  //     { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_depths_buffer } },
-  //     { binding: 2, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
-  //     { binding: 3, resource: { buffer: sorter.sort_dispatch_indirect_buffer } },
-  //   ],
-  // });
+  const sort_bind_group = device.createBindGroup({
+    label: 'sort',
+    layout: preprocess_pipeline.getBindGroupLayout(2),
+    entries: [
+      { binding: 0, resource: { buffer: sorter.sort_info_buffer } },
+      { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_depths_buffer } },
+      { binding: 2, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
+      { binding: 3, resource: { buffer: sorter.sort_dispatch_indirect_buffer } },
+    ],
+  });
 
   const preprocess_camera_bind_group = device.createBindGroup({
     label: 'preprocess camera',
@@ -183,7 +176,7 @@ export default function get_renderer(
     pass.setPipeline(preprocess_pipeline);
     pass.setBindGroup(0, preprocess_camera_bind_group);
     pass.setBindGroup(1, preprocess_data_bind_group);
-    // pass.setBindGroup(2, sort_bind_group);
+    pass.setBindGroup(2, sort_bind_group);
     pass.dispatchWorkgroups(preprocess_workgroup_count);
     pass.end();
   };
@@ -193,7 +186,16 @@ export default function get_renderer(
   // ===============================================
   return {
     frame: (encoder: GPUCommandEncoder, texture_view: GPUTextureView) => {
+      device.queue.writeBuffer(sorter.sort_info_buffer, 0, new Uint32Array([0]));
+      device.queue.writeBuffer(sorter.sort_dispatch_indirect_buffer, 0, new Uint32Array([0, 1, 1]))
       preprocess(encoder);
+      encoder.copyBufferToBuffer(
+      sorter.sort_info_buffer,              // source: keys_size
+        0,                                    // src offset (bytes)
+        indirect_buffer,                      // dest: indirect draw args
+        Uint32Array.BYTES_PER_ELEMENT,        // dst offset (skip vertexCount)
+        Uint32Array.BYTES_PER_ELEMENT         // size (just the instanceCount)
+      );
       sorter.sort(encoder);
       render(encoder, texture_view);
     },

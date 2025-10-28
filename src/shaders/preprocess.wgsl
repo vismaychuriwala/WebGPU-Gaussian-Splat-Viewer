@@ -127,7 +127,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
         return;
     }
 
-    let keys_per_dispatch = workgroupSize * sortKeyPerThread; 
+    let keys_per_dispatch = workgroupSize * sortKeyPerThread;
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys
 
     var out: Splat;
@@ -141,7 +141,21 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     // // MVP calculations
     let clip_pos = camera.proj * camera.view * pos;
     let ndc = clip_pos.xyz / clip_pos.w;
-
+    if (abs(ndc.x) > 1.2 || abs(ndc.y) > 1.2 || ndc.z < -1.0 || ndc.z > 1.0 || clip_pos.w <= 0.0) {
+        return;
+    }
     out.position = vec4<f32>(ndc, 1.0);
-    splats[idx] = out;
+    let out_idx = atomicAdd(&sort_infos.keys_size, 1u);
+
+    if (out_idx >= arrayLength(&splats)) { return; }
+
+    if (out_idx != 0 && out_idx % keys_per_dispatch == 0) {
+        atomicAdd(&sort_dispatch.dispatch_x, 1u);
+    }
+
+    let depth = 1.0 - ndc.z;
+    splats[out_idx] = out;
+    sort_indices[out_idx] = out_idx;
+    sort_depths[out_idx] = bitcast<u32>(depth);
+
 }
