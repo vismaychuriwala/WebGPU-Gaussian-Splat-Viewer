@@ -5,7 +5,7 @@ import { get_sorter,c_histogram_block_rows,C } from '../sort/sort';
 import { Renderer } from './renderer';
 
 export interface GaussianRenderer extends Renderer {
-
+  setGaussianMultiplier: (value: number) => void;
 }
 
 // Utility to create GPU buffers
@@ -67,6 +67,15 @@ export default function get_renderer(
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
   );
 
+  const render_settings_data = new Float32Array([1.0, pc.sh_deg, 0.0, 0.0]);
+  const render_settings_buffer = createBuffer(
+    device,
+    'render settings',
+    render_settings_data.byteLength,
+    GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    render_settings_data
+  );
+
   // ===============================================
   //    Create Compute Pipeline and Bind Groups
   // ===============================================
@@ -101,6 +110,7 @@ export default function get_renderer(
     layout: preprocess_pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: camera_buffer } },
+      { binding: 1, resource: { buffer: render_settings_buffer } },
     ],
   });
 
@@ -200,5 +210,9 @@ export default function get_renderer(
       render(encoder, texture_view);
     },
     camera_buffer,
+    setGaussianMultiplier: (value: number) => {
+      render_settings_data[0] = value;
+      device.queue.writeBuffer(render_settings_buffer, 0, render_settings_data);
+    },
   };
 }

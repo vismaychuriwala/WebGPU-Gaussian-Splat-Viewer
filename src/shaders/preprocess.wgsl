@@ -65,6 +65,8 @@ struct Splat {
 
 @group(0) @binding(0)
 var<uniform> camera: CameraUniforms;
+@group(0) @binding(1)
+var<uniform> render_settings: RenderSettings;
 
 @group(1) @binding(0)
 var<storage,read> gaussians : array<Gaussian>;
@@ -144,12 +146,15 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     if (abs(ndc.x) > 1.2 || abs(ndc.y) > 1.2 || ndc.z < -1.0 || ndc.z > 1.0 || clip_pos.w <= 0.0) {
         return;
     }
+    let gaussian_scaling = render_settings.gaussian_scaling;
+
     out.position = vec4<f32>(ndc, 1.0);
     let out_idx = atomicAdd(&sort_infos.keys_size, 1u);
 
     if (out_idx >= arrayLength(&splats)) { return; }
 
-    if (out_idx != 0 && out_idx % keys_per_dispatch == 0) {
+    let processed = out_idx + 1u;
+    if (keys_per_dispatch != 0u && processed % keys_per_dispatch == 0u) {
         atomicAdd(&sort_dispatch.dispatch_x, 1u);
     }
 
