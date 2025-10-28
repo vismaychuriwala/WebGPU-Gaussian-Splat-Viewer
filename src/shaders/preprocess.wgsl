@@ -58,6 +58,8 @@ struct Gaussian {
 struct Splat {
     //TODO: store information for 2D splat rendering
     position: vec4<f32>,
+    quad_size: vec2<f32>,
+    color: vec4<f32>,
 };
 
 
@@ -121,12 +123,54 @@ fn getS(scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
     return S;
 }
 
-fn getCov3d(rot: array<u32,2>, scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
+fn computeCov3d(rot: array<u32,2>, scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
     let R = getR(rot);
     let S = getS(scale, gaussian_scaling);
     return R * S * transpose(S) * transpose(R);
 }
 
+fn transformPoint4x3(p: vec3<f32>, m: mat4x4<f32>) -> vec3<f32> {
+    let transformed = vec3<f32>(
+        dot(m[0].xyz, p) + m[3].x,
+        dot(m[1].xyz, p) + m[3].y,
+        dot(m[2].xyz, p) + m[3].z
+    );
+    return transformed;
+}
+
+fn computeCov2D(mean: vec3<f32>, cov3D: mat3x3<f32>) -> vec3<f32> {
+    let W = mat3x3<f32>(
+        camera.view[0].xyz,
+        camera.view[1].xyz,
+        camera.view[2].xyz
+    );
+    let t = transformPoint4x3(mean, camera.view);
+
+    let J = mat3x3<f32>(
+        camera.focal.x / t.z, 0., -(camera.focal.x * t.x) / (t.z * t.z),
+		0., camera.focal.y / t.z, -(camera.focal.y * t.y) / (t.z * t.z),
+		0., 0., 0.
+    );
+    let T = W * J;
+    var cov = transpose(T) * cov3D * T;
+    cov[0][0] += 0.3;
+	cov[1][1] += 0.3;
+    return vec3<f32>(cov[0][0], cov[0][1], cov[1][1]);
+}
+
+fn computeConic(cov: vec3<f32>) -> vec3<f32> {
+    let det = (cov.x * cov.z - cov.y * cov.y);
+    let det_inv = 1.0/ det;
+    return vec3<f32> (cov.z * det_inv, -cov.y * det_inv, cov.x * det_inv);
+}
+
+fn computeRadius(cov: vec3<f32>) -> f32 {
+    let det = (cov.x * cov.z - cov.y * cov.y);
+    let mid = 0.5 * (cov.x + cov.z);
+    let lambda1 = mid + sqrt(max(0.1, mid * mid - det));
+    let lambda2 = mid - sqrt(max(0.1, mid * mid - det));
+    return ceil(3.0 * sqrt(max(lambda1, lambda2)));
+}
 
 /// reads the ith sh coef from the storage buffer 
 fn sh_coef(splat_idx: u32, c_idx: u32) -> vec3<f32> {
@@ -178,7 +222,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let keys_per_dispatch = workgroupSize * sortKeyPerThread;
     // increment DispatchIndirect.dispatchx each time you reach limit for one dispatch of keys
 
-    var out: Splat;
+    var splat_out: Splat;
     let vertex = gaussians[idx];
 
     let a = unpack2x16float(vertex.pos_opacity[0]);
@@ -192,21 +236,41 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     if (abs(ndc.x) > 1.2 || abs(ndc.y) > 1.2 || ndc.z < -1.0 || ndc.z > 1.0 || clip_pos.w <= 0.0) {
         return;
     }
+
+    let uv = vec2<f32>(
+    0.5 * (ndc.x + 1.0),
+    0.5 * (1.0 - ndc.y)
+    );
+
     let gaussian_scaling = render_settings.gaussian_scaling;
 
-    out.position = vec4<f32>(ndc, 1.0);
+    splat_out.position = vec4<f32>(ndc, 1.0);
     let out_idx = atomicAdd(&sort_infos.keys_size, 1u);
 
     if (out_idx >= arrayLength(&splats)) { return; }
 
     let processed = out_idx + 1u;
-    if (keys_per_dispatch != 0u && processed % keys_per_dispatch == 0u) {
-        atomicAdd(&sort_dispatch.dispatch_x, 1u);
+    if (keys_per_dispatch != 0u) {
+        let required_dispatch = (processed + keys_per_dispatch - 1u) / keys_per_dispatch;
+        atomicMax(&sort_dispatch.dispatch_x, required_dispatch);
     }
 
+    let cov3D = computeCov3d(vertex.rot, vertex.scale, gaussian_scaling);
+    let cov2D = computeCov2D(pos.xyz, cov3D);
+    // let conic = computeConic(cov2D);
+    let radius = computeRadius(cov2D);
+
+    let quad_size = vec2<f32>(
+      radius * 4.0 / camera.viewport.x,
+      radius * 4.0 / camera.viewport.y
+    );
+
+    splat_out.quad_size = quad_size;
+    splat_out.color = vec4<f32>(quad_size.x, quad_size.y, 0.0, 1.0);
+    // splat_out.color = vec3<f32>(1.0);
+
     let depth = 1.0 - ndc.z;
-    splats[out_idx] = out;
+    splats[out_idx] = splat_out;
     sort_indices[out_idx] = out_idx;
     sort_depths[out_idx] = bitcast<u32>(depth);
-
 }

@@ -59,7 +59,8 @@ export default function get_renderer(
     drawArgsData
   );
 
-  const splatBufferSize = pc.num_points * 4 * Float32Array.BYTES_PER_ELEMENT;
+  // Each splat packs 12 floats (position vec4, quad_size vec2, color vec3 + padding)
+  const splatBufferSize = pc.num_points * 12 * Float32Array.BYTES_PER_ELEMENT;
   const splat_buffer = createBuffer(
     device,
     'gaussian splats',
@@ -151,6 +152,7 @@ export default function get_renderer(
     layout: render_pipeline.getBindGroupLayout(0),
     entries: [
       { binding: 0, resource: { buffer: splat_buffer } },
+      { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
     ],
   });
 
