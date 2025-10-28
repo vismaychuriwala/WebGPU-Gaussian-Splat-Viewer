@@ -82,6 +82,52 @@ var<storage, read_write> sort_indices : array<u32>;
 @group(2) @binding(3)
 var<storage, read_write> sort_dispatch: DispatchIndirect;
 
+
+fn getR(rot: array<u32,2>) -> mat3x3<f32> {
+    var x = unpack2x16float(rot[0]).x;
+    var y = unpack2x16float(rot[0]).y;
+    var z = unpack2x16float(rot[1]).x;
+    var r = unpack2x16float(rot[1]).y;
+
+    // Normalize
+    let len = sqrt(x*x + y*y + z*z + r*r);
+    x = x / len;
+    y = y / len;
+    z = z / len;
+    r = r / len;
+
+    let R = mat3x3<f32>(
+        1. - 2. * (y * y + z * z), 2. * (x * y - r * z), 2. * (x * z + r * y),
+        2. * (x * y + r * z), 1. - 2. * (x * x + z * z), 2. * (y * z - r * x),
+        2. * (x * z - r * y), 2. * (y * z + r * x), 1. - 2. * (x * x + y * y)
+    );
+    return R;
+}
+
+fn getS(scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
+    var x = unpack2x16float(scale[0]).x;
+    var y = unpack2x16float(scale[0]).y;
+    var z = unpack2x16float(scale[1]).x;
+
+    x = exp(x);
+    y = exp(y);
+    z = exp(z);
+
+    let S = mat3x3<f32>(
+        x * gaussian_scaling, 0., 0.,
+        0., y * gaussian_scaling, 0.,
+        0., 0., z * gaussian_scaling
+    );
+    return S;
+}
+
+fn getCov3d(rot: array<u32,2>, scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
+    let R = getR(rot);
+    let S = getS(scale, gaussian_scaling);
+    return R * S * transpose(S) * transpose(R);
+}
+
+
 /// reads the ith sh coef from the storage buffer 
 fn sh_coef(splat_idx: u32, c_idx: u32) -> vec3<f32> {
     //TODO: access your binded sh_coeff, see load.ts for how it is stored
