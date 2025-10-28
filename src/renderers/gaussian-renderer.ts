@@ -36,6 +36,44 @@ export default function get_renderer(
 
   const nulling_data = new Uint32Array([0]);
 
+  const quadVerts = new Float32Array([
+    -0.5, -0.5,
+    0.5, -0.5, 
+    -0.5, 0.5, 
+    0.5, 0.5,
+  ]);
+  const quadVBO = createBuffer(
+    device,
+    'quad vertices',
+    quadVerts.byteLength,
+    GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    quadVerts
+  );
+
+  const drawArgsData = new Uint32Array([4, pc.num_points, 0, 0]);
+  const indirect_buffer = createBuffer(
+    device,
+    'indirect buffer',
+    drawArgsData.byteLength,
+    GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST,
+    drawArgsData
+  );
+
+  const splatBufferSize = pc.num_points * 4 * Float32Array.BYTES_PER_ELEMENT;
+  const splat_buffer = createBuffer(
+    device,
+    'gaussian splats',
+    splatBufferSize,
+    GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+  );
+
+  // const preprocess_dispatch_buffer = createBuffer(
+  //   device,
+  //   'preprocess sort dispatch scratch',
+  //   4 * Uint32Array.BYTES_PER_ELEMENT,
+  //   GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  //   new Uint32Array(4)
+  // );
   // ===============================================
   //    Create Compute Pipeline and Bind Groups
   // ===============================================
@@ -52,14 +90,33 @@ export default function get_renderer(
     },
   });
 
-  const sort_bind_group = device.createBindGroup({
-    label: 'sort',
-    layout: preprocess_pipeline.getBindGroupLayout(2),
+  const preprocess_workgroup_count = Math.ceil(pc.num_points / C.histogram_wg_size);
+
+  // const sort_bind_group = device.createBindGroup({
+  //   label: 'sort',
+  //   layout: preprocess_pipeline.getBindGroupLayout(2),
+  //   entries: [
+  //     { binding: 0, resource: { buffer: sorter.sort_info_buffer } },
+  //     { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_depths_buffer } },
+  //     { binding: 2, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
+  //     { binding: 3, resource: { buffer: sorter.sort_dispatch_indirect_buffer } },
+  //   ],
+  // });
+
+  const preprocess_camera_bind_group = device.createBindGroup({
+    label: 'preprocess camera',
+    layout: preprocess_pipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: sorter.sort_info_buffer } },
-      { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_depths_buffer } },
-      { binding: 2, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
-      { binding: 3, resource: { buffer: sorter.sort_dispatch_indirect_buffer } },
+      { binding: 0, resource: { buffer: camera_buffer } },
+    ],
+  });
+
+  const preprocess_data_bind_group = device.createBindGroup({
+    label: 'preprocess data',
+    layout: preprocess_pipeline.getBindGroupLayout(1),
+    entries: [
+      { binding: 0, resource: { buffer: pc.gaussian_3d_buffer } },
+      { binding: 1, resource: { buffer: splat_buffer } },
     ],
   });
 
@@ -68,18 +125,77 @@ export default function get_renderer(
   //    Create Render Pipeline and Bind Groups
   // ===============================================
   
+  const render_shader = device.createShaderModule({code: renderWGSL});
+  const render_pipeline = device.createRenderPipeline({
+    label: 'render',
+    layout: 'auto',
+    vertex: {
+      module: render_shader,
+      entryPoint: 'vs_main',
+    },
+    fragment: {
+      module: render_shader,
+      entryPoint: 'fs_main',
+      targets: [{ format: presentation_format }],
+    },
+    primitive: {
+      topology: 'triangle-strip',
+    },
+  });
+
+  const splat_bind_group = device.createBindGroup({
+    label: 'gaussian splats',
+    layout: render_pipeline.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: splat_buffer } },
+    ],
+  });
 
   // ===============================================
   //    Command Encoder Functions
   // ===============================================
-  
+  const render = (encoder: GPUCommandEncoder, texture_view: GPUTextureView) => {
+    const pass = encoder.beginRenderPass({
+      label: 'point cloud render',
+      colorAttachments: [
+        {
+          view: texture_view,
+          loadOp: 'clear',
+          storeOp: 'store',
+        }
+      ],
+    });
+    pass.setPipeline(render_pipeline);
+    pass.setBindGroup(0, splat_bind_group);
+
+    pass.setVertexBuffer(0, quadVBO);
+
+    pass.drawIndirect(indirect_buffer, 0);
+
+    // pass.draw(pc.num_points);
+    pass.end();
+  };
+
+  const preprocess = (encoder: GPUCommandEncoder) => {
+    const pass = encoder.beginComputePass({
+      label: 'gaussian preprocess',
+    });
+    pass.setPipeline(preprocess_pipeline);
+    pass.setBindGroup(0, preprocess_camera_bind_group);
+    pass.setBindGroup(1, preprocess_data_bind_group);
+    // pass.setBindGroup(2, sort_bind_group);
+    pass.dispatchWorkgroups(preprocess_workgroup_count);
+    pass.end();
+  };
 
   // ===============================================
   //    Return Render Object
   // ===============================================
   return {
     frame: (encoder: GPUCommandEncoder, texture_view: GPUTextureView) => {
+      preprocess(encoder);
       sorter.sort(encoder);
+      render(encoder, texture_view);
     },
     camera_buffer,
   };
