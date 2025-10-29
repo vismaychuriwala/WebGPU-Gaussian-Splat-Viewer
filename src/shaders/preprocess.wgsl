@@ -227,6 +227,10 @@ fn computeColorFromSH(dir: vec3<f32>, v_idx: u32, sh_deg: u32) -> vec3<f32> {
     return  max(vec3<f32>(0.), result);
 }
 
+fn sigmoid(x: f32) -> f32 {
+    return 1.0 / (1.0 + exp(-x));
+}
+
 @compute @workgroup_size(workgroupSize,1,1)
 fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) wgs: vec3<u32>) {
     let idx = gid.x;
@@ -245,7 +249,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let b = unpack2x16float(vertex.pos_opacity[1]);
 
     let pos = vec4<f32>(a.x, a.y, b.x, 1.);
-    let opacity = b.y;
+    let opacity = sigmoid(b.y);
 
     // // MVP calculations
     let clip_pos = camera.proj * camera.view * pos; // clip space

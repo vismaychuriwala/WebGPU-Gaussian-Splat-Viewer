@@ -135,7 +135,7 @@ export default function get_renderer(
   
   const render_shader = device.createShaderModule({code: renderWGSL});
   const render_pipeline = device.createRenderPipeline({
-    label: 'render',
+    label: 'gaussian render',
     layout: 'auto',
     vertex: {
       module: render_shader,
@@ -148,7 +148,7 @@ export default function get_renderer(
         format: presentation_format,
         blend: {
           color: {
-            srcFactor: 'src-alpha',
+            srcFactor: 'one',
             dstFactor: 'one-minus-src-alpha',
             operation: 'add',
           },
@@ -162,6 +162,7 @@ export default function get_renderer(
     },
     primitive: {
       topology: 'triangle-strip',
+      cullMode: 'none'
     },
   });
 

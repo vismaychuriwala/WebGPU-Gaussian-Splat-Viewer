@@ -81,18 +81,16 @@ fn fs_main(
     frag_pos_ndc.y *= -1.0;
     var d = frag_pos_ndc - in.center_ndc;
     d *= camera.viewport * 0.5;
-    // return vec4<f32>(d.x, d.y, 0.0, 1.0);
-    d.x *= -1;
 
-    let power = -0.5 * (in.conic.x * d.x * d.x
-          + 2.0 * in.conic.y * d.x * d.y
-          + in.conic.z * d.y * d.y);
+    let power = -0.5 * (
+          in.conic.x * d.x * d.x
+        + in.conic.z * d.y * d.y
+        - 2.0 * in.conic.y * d.x * d.y
+    );
 
-    let weight = exp(power) * in.opacity;
-    if (weight < 1.0 / 255.0) {
-        discard;
+    if (power > 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
-    let raw_alpha = weight  * in.color.a;
-    let alpha = sigmoid(raw_alpha * 6.0 - 3.0);
-    return vec4<f32>(in.color.rgb, alpha);
+    let weight = exp(power) * in.opacity;
+    return in.color * min(weight, 0.99);
 }
