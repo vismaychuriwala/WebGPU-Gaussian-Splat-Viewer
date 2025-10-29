@@ -1,18 +1,18 @@
 struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
+    @builtin(position) position: vec4<f32>, // clip-space position written to rasterizer
     //TODO: information passed from vertex shader to fragment shader
-    @location(0) color: vec4<f32>,
-    @location(1) conic: vec3<f32>,
+    @location(0) color: vec4<f32>, // linear colour
+    @location(1) conic: vec3<f32>, // pixel-space conic coefficients
     @location(2) opacity: f32,
-    @location(3) center: vec2<f32>,
+    @location(3) center_ndc: vec2<f32>,
 };
 
 struct Splat {
-    //TODO: information defined in preprocess compute shader
-    position: vec4<f32>,
-    quad_size: vec2<f32>,
+    //TODO: store information for 2D splat rendering
+    centre_ndc: vec2<f32>,
+    radius_ndc: vec2<f32>,
     color: vec4<f32>,
-    conic: vec3<f32>,
+    conic: vec3<f32>, // pixel-space conic coefficients
     opacity: f32,
 };
 
@@ -45,9 +45,8 @@ fn vs_main(
     var out: VertexOutput;
     let splat_index = sorted_indices[in_instance_index];
     let splat = splats[splat_index];
-    let pos = splat.position;
-    let uv = vec2<f32>(0.5 * (pos.x + 1.0), 0.5 * (1.0 - pos.y));
-    out.center = uv * camera.viewport;
+
+    let centre_ndc = splat.centre_ndc; // clip space
     var corners = array<vec2<f32>, 4>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
@@ -55,11 +54,14 @@ fn vs_main(
         vec2<f32>( 1.0,  1.0)
     );
 
-    let offset = corners[in_vertex_index] * splat.quad_size;
-    out.position = vec4<f32>(pos.x + offset.x, pos.y + offset.y, pos.z, 1.0);
+    let offset_ndc = corners[in_vertex_index] * splat.radius_ndc; // NDC delta
+    
+    out.position = vec4<f32>(centre_ndc + offset_ndc, 0.0, 1.0);
     out.color = splat.color;
     out.conic = splat.conic;
     out.opacity = splat.opacity;
+    out.center_ndc = centre_ndc; 
+
     return out;
 }
 
@@ -67,20 +69,25 @@ fn vs_main(
 fn fs_main(
     in: VertexOutput,
 ) -> @location(0) vec4<f32> {
-    let frag_px = in.position.xy;
-    let quad_center = in.center;
-    let d = vec2<f32>(quad_center.x - frag_px.x, frag_px.y - quad_center.y);
+    // return in.color;
+    var frag_pos_ndc = (in.position.xy / camera.viewport) * 2.0 - 1.0;
+    frag_pos_ndc.y *= -1.0;
+    var d = frag_pos_ndc - in.center_ndc;
+    d *= camera.viewport * 0.5;
+    // return vec4<f32>(d.x, d.y, 0.0, 1.0);
+    d.x *= -1;
 
-    let q = in.conic.x * d.x * d.x
+    let power = -0.5 * (in.conic.x * d.x * d.x
           + 2.0 * in.conic.y * d.x * d.y
-          + in.conic.z * d.y * d.y;
+          + in.conic.z * d.y * d.y);
 
-    if (q > 9.0) {
-        discard;
+    if (power > 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 
-    let weight = exp(-0.5 * q);
+    let weight = exp(power);
+    return in.color * min(in.opacity * exp(power), 0.99);
     let raw_alpha = weight * in.opacity * in.color.a;
-    let alpha = sigmoid(raw_alpha * 6.0 - 3.0);
+    let alpha = sigmoid(raw_alpha * 6.0 - 3.0); // remap to emphasise mid-range opacity
     return vec4<f32>(in.color.rgb, alpha);
 }

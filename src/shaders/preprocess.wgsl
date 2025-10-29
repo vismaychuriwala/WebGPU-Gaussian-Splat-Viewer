@@ -57,10 +57,10 @@ struct Gaussian {
 
 struct Splat {
     //TODO: store information for 2D splat rendering
-    position: vec4<f32>,
-    quad_size: vec2<f32>,
+    centre_ndc: vec2<f32>,
+    radius_ndc: vec2<f32>,
     color: vec4<f32>,
-    conic: vec3<f32>,
+    conic: vec3<f32>, // pixel-space conic coefficients
     opacity: f32,
 };
 
@@ -90,10 +90,10 @@ var<storage, read_write> sort_dispatch: DispatchIndirect;
 
 
 fn getR(rot: array<u32,2>) -> mat3x3<f32> {
-    var x = unpack2x16float(rot[0]).x;
-    var y = unpack2x16float(rot[0]).y;
-    var z = unpack2x16float(rot[1]).x;
-    var r = unpack2x16float(rot[1]).y;
+    var r = unpack2x16float(rot[0]).x;
+    var x = unpack2x16float(rot[0]).y;
+    var y = unpack2x16float(rot[1]).x;
+    var z = unpack2x16float(rot[1]).y;
 
     // Normalize
     let len = sqrt(x*x + y*y + z*z + r*r);
@@ -130,23 +130,23 @@ fn getS(scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
 fn computeCov3d(rot: array<u32,2>, scale: array<u32,2>, gaussian_scaling: f32) -> mat3x3<f32> {
     let R = getR(rot);
     let S = getS(scale, gaussian_scaling);
-    return R * S * transpose(S) * transpose(R);
+    let A = S * R;
+    return transpose(A) * A;
 }
 
 fn transformPoint4x3(p: vec3<f32>, m: mat4x4<f32>) -> vec3<f32> {
-    let transformed = vec3<f32>(
-        dot(m[0].xyz, p) + m[3].x,
-        dot(m[1].xyz, p) + m[3].y,
-        dot(m[2].xyz, p) + m[3].z
+    return vec3<f32>(
+        m[0].x * p.x + m[1].x * p.y + m[2].x * p.z + m[3].x,
+        m[0].y * p.x + m[1].y * p.y + m[2].y * p.z + m[3].y,
+        m[0].z * p.x + m[1].z * p.y + m[2].z * p.z + m[3].z
     );
-    return transformed;
 }
 
 fn computeCov2D(mean: vec3<f32>, cov3D: mat3x3<f32>) -> vec3<f32> {
     let W = mat3x3<f32>(
-        camera.view[0].xyz,
-        camera.view[1].xyz,
-        camera.view[2].xyz
+        camera.view[0].x, camera.view[1].x, camera.view[2].x,
+        camera.view[0].y, camera.view[1].y, camera.view[2].y,
+        camera.view[0].z, camera.view[1].z, camera.view[2].z
     );
     let t = transformPoint4x3(mean, camera.view);
 
@@ -156,7 +156,12 @@ fn computeCov2D(mean: vec3<f32>, cov3D: mat3x3<f32>) -> vec3<f32> {
 		0., 0., 0.
     );
     let T = W * J;
-    var cov = transpose(T) * cov3D * T;
+    let Vrk = mat3x3<f32>(
+        cov3D[0][0], cov3D[0][1], cov3D[0][2],
+        cov3D[0][1], cov3D[1][1], cov3D[1][2],
+        cov3D[0][2], cov3D[1][2], cov3D[2][2],
+    );
+    var cov = transpose(T) * Vrk * T;
     cov[0][0] += 0.3;
 	cov[1][1] += 0.3;
     return vec3<f32>(cov[0][0], cov[0][1], cov[1][1]);
@@ -177,12 +182,18 @@ fn computeRadius(cov: vec3<f32>) -> f32 {
 }
 
 fn sh_coef(splat_idx: u32, c_idx: u32) -> vec3<f32> {
-    let base = splat_idx * 24u;
-    let word_idx = base + (c_idx * 3u) / 2u;
-    let pair0 = unpack2x16float(sh_buffer[word_idx + 0u]);
-    let pair1 = unpack2x16float(sh_buffer[word_idx + 1u]);
-    // pick first 3 as RGB
-    return vec3<f32>(pair0.x, pair0.y, pair1.x);
+    let half_idx = c_idx >> 1u; // c_idx / 2
+    let odd = c_idx & 1u;       // c_idx % 2
+
+    let base_index = splat_idx * 24u + half_idx * 3u + odd;
+
+    let color01 = unpack2x16float(sh_buffer[base_index + 0u]);
+    let color23 = unpack2x16float(sh_buffer[base_index + 1u]);
+
+    let even_vec = vec3<f32>(color01.x, color01.y, color23.x);
+    let odd_vec  = vec3<f32>(color01.y, color23.x, color23.y);
+
+    return mix(even_vec, odd_vec, f32(odd));
 }
 
 // spherical harmonics evaluation with Condon–Shortley phase
@@ -239,20 +250,19 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let opacity = b.y;
 
     // // MVP calculations
-    let clip_pos = camera.proj * camera.view * pos;
-    let ndc = clip_pos.xyz / clip_pos.w;
-    if (abs(ndc.x) > 1.2 || abs(ndc.y) > 1.2 || ndc.z < -1.0 || ndc.z > 1.0 || clip_pos.w <= 0.0) {
+    let clip_pos = camera.proj * camera.view * pos; // clip space
+    let ndc = clip_pos.xy / clip_pos.w; // NDC space
+    let depth = clip_pos.z / clip_pos.w;
+    if (depth < 0.0 || depth > 1.0) {
+        return;
+    }
+    if (abs(ndc.x) > 1.2 || abs(ndc.y) > 1.2) {
         return;
     }
 
-    let uv = vec2<f32>(
-    0.5 * (ndc.x + 1.0),
-    0.5 * (1.0 - ndc.y)
-    );
-
     let gaussian_scaling = render_settings.gaussian_scaling;
 
-    splat_out.position = vec4<f32>(ndc, 1.0);
+    splat_out.centre_ndc = ndc;
     let out_idx = atomicAdd(&sort_infos.keys_size, 1u);
 
     if (out_idx >= arrayLength(&splats)) { return; }
@@ -263,27 +273,27 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
         atomicMax(&sort_dispatch.dispatch_x, required_dispatch);
     }
 
-    let cov3D = computeCov3d(vertex.rot, vertex.scale, gaussian_scaling);
-    let cov2D = computeCov2D(pos.xyz, cov3D);
-    let conic = computeConic(cov2D);
-    let radius = computeRadius(cov2D);
+    let cov3D = computeCov3d(vertex.rot, vertex.scale, gaussian_scaling); // world space covariance
+    let cov2D = computeCov2D(pos.xyz, cov3D); // screen-space covariance
+    let conic = computeConic(cov2D); // pixel-space conic coefficients
+    let radius = computeRadius(cov2D); // pixel radius (3 sigma)
     
     splat_out.conic = conic;
     splat_out.opacity = opacity;
 
-    let quad_size = vec2<f32>(
+    let quad_size = vec2<f32>( // NDC half-extent per axis
       radius * 2.0 / camera.viewport.x,
       radius * 2.0 / camera.viewport.y
     );
 
-    splat_out.quad_size = quad_size;
+    splat_out.radius_ndc = quad_size;
     // splat_out.color = vec4<f32>(quad_size.x, quad_size.y, 0.0, 1.0);
     let cam_pos = camera.view_inv[3].xyz;
     let dir = normalize(pos.xyz - cam_pos);
     splat_out.color = vec4<f32>(computeColorFromSH(dir, idx, render_settings.sh_deg), 1.0);
 
-    let depth = 1.0 - ndc.z;
+    let pos_depth = 1.0 - depth;
     splats[out_idx] = splat_out;
     sort_indices[out_idx] = out_idx;
-    sort_depths[out_idx] = bitcast<u32>(depth);
+    sort_depths[out_idx] = bitcast<u32>(pos_depth);
 }
