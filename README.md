@@ -1,14 +1,15 @@
-# Project5-WebGPU-Gaussian-Splat-Viewer
+# WebGPU-Gaussian-Splat-Viewer
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 5**
-
-* (TODO) YOUR NAME HERE
-* Tested on: (TODO) **Google Chrome 222.2** on
-  Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+* Hi! I am Vismay Churiwala, here are my socials:  
+  * [LinkedIn](https://www.linkedin.com/in/vismay-churiwala-8b0073190/) | [Website](https://vismaychuriwala.com/)
+* **Tested On (My Machine):** 
+  * Microsoft Edge 141.0.3537.99
+  * OS: Windows 11, CPU: AMD Ryzen 7 5800H with Radeon Graphics (8C/16T, 3.2GHz base), RAM: 32GB DDR4, GPU: NVIDIA GeForce RTX 3060 Laptop GPU (6GB GDDR6)
 
 ### Live Demo
 
-[![](img/bicycle.png)](http://TODO.github.io/Project4-WebGPU-Forward-Plus-and-Clustered-Deferred)
+[![](images/bicycle.png)](https://vismaychuriwala.github.io/WebGPU-Gaussian-Splat-Viewer/)
+* Click above to Demo it yourself!
 
 ### Demo Video/GIF
 
