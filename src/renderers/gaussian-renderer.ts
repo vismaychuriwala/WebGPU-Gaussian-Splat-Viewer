@@ -59,8 +59,7 @@ export default function get_renderer(
     drawArgsData
   );
 
-  // Each splat packs 12 floats (position vec4, quad_size vec2, color vec3 + padding)
-  const splatBufferSize = pc.num_points * 12 * Float32Array.BYTES_PER_ELEMENT;
+  const splatBufferSize = pc.num_points * 16 * Float32Array.BYTES_PER_ELEMENT;
   const splat_buffer = createBuffer(
     device,
     'gaussian splats',
@@ -68,13 +67,17 @@ export default function get_renderer(
     GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
   );
 
-  const render_settings_data = new Float32Array([1.0, pc.sh_deg, 0.0, 0.0]);
+  const renderSettingsBlock = new ArrayBuffer(16);
+  const renderSettingsF32 = new Float32Array(renderSettingsBlock);
+  const renderSettingsU32 = new Uint32Array(renderSettingsBlock);
+  renderSettingsF32[0] = 1.0;
+  renderSettingsU32[1] = pc.sh_deg;
   const render_settings_buffer = createBuffer(
     device,
     'render settings',
-    render_settings_data.byteLength,
+    renderSettingsBlock.byteLength,
     GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    render_settings_data
+    renderSettingsBlock
   );
 
   // ===============================================
@@ -121,6 +124,7 @@ export default function get_renderer(
     entries: [
       { binding: 0, resource: { buffer: pc.gaussian_3d_buffer } },
       { binding: 1, resource: { buffer: splat_buffer } },
+      { binding: 2, resource: { buffer: pc.sh_buffer } },
     ],
   });
 
@@ -140,7 +144,21 @@ export default function get_renderer(
     fragment: {
       module: render_shader,
       entryPoint: 'fs_main',
-      targets: [{ format: presentation_format }],
+      targets: [{
+        format: presentation_format,
+        blend: {
+          color: {
+            srcFactor: 'src-alpha',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+          alpha: {
+            srcFactor: 'one',
+            dstFactor: 'one-minus-src-alpha',
+            operation: 'add',
+          },
+        },
+      }],
     },
     primitive: {
       topology: 'triangle-strip',
@@ -153,6 +171,7 @@ export default function get_renderer(
     entries: [
       { binding: 0, resource: { buffer: splat_buffer } },
       { binding: 1, resource: { buffer: sorter.ping_pong[0].sort_indices_buffer } },
+      { binding: 2, resource: { buffer: camera_buffer } },
     ],
   });
 
@@ -213,8 +232,8 @@ export default function get_renderer(
     },
     camera_buffer,
     setGaussianMultiplier: (value: number) => {
-      render_settings_data[0] = value;
-      device.queue.writeBuffer(render_settings_buffer, 0, render_settings_data);
+      renderSettingsF32[0] = value;
+      device.queue.writeBuffer(render_settings_buffer, 0, renderSettingsBlock);
     },
   };
 }

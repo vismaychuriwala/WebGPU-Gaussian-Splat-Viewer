@@ -46,7 +46,7 @@ struct CameraUniforms {
 
 struct RenderSettings {
     gaussian_scaling: f32,
-    sh_deg: f32,
+    sh_deg: u32,
 }
 
 struct Gaussian {
@@ -60,8 +60,9 @@ struct Splat {
     position: vec4<f32>,
     quad_size: vec2<f32>,
     color: vec4<f32>,
+    conic: vec3<f32>,
+    opacity: f32,
 };
-
 
 //TODO: bind your data here
 
@@ -74,6 +75,9 @@ var<uniform> render_settings: RenderSettings;
 var<storage,read> gaussians : array<Gaussian>;
 @group(1) @binding(1)
 var<storage, read_write> splats : array<Splat>;
+@group(1) @binding(2)
+var<storage, read> sh_buffer : array<u32>;
+
 
 @group(2) @binding(0)
 var<storage, read_write> sort_infos: SortInfos;
@@ -172,10 +176,13 @@ fn computeRadius(cov: vec3<f32>) -> f32 {
     return ceil(3.0 * sqrt(max(lambda1, lambda2)));
 }
 
-/// reads the ith sh coef from the storage buffer 
 fn sh_coef(splat_idx: u32, c_idx: u32) -> vec3<f32> {
-    //TODO: access your binded sh_coeff, see load.ts for how it is stored
-    return vec3<f32>(0.0);
+    let base = splat_idx * 24u;
+    let word_idx = base + (c_idx * 3u) / 2u;
+    let pair0 = unpack2x16float(sh_buffer[word_idx + 0u]);
+    let pair1 = unpack2x16float(sh_buffer[word_idx + 1u]);
+    // pick first 3 as RGB
+    return vec3<f32>(pair0.x, pair0.y, pair1.x);
 }
 
 // spherical harmonics evaluation with Condon–Shortley phase
@@ -229,6 +236,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let b = unpack2x16float(vertex.pos_opacity[1]);
 
     let pos = vec4<f32>(a.x, a.y, b.x, 1.);
+    let opacity = b.y;
 
     // // MVP calculations
     let clip_pos = camera.proj * camera.view * pos;
@@ -257,17 +265,22 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
 
     let cov3D = computeCov3d(vertex.rot, vertex.scale, gaussian_scaling);
     let cov2D = computeCov2D(pos.xyz, cov3D);
-    // let conic = computeConic(cov2D);
+    let conic = computeConic(cov2D);
     let radius = computeRadius(cov2D);
+    
+    splat_out.conic = conic;
+    splat_out.opacity = opacity;
 
     let quad_size = vec2<f32>(
-      radius * 4.0 / camera.viewport.x,
-      radius * 4.0 / camera.viewport.y
+      radius * 2.0 / camera.viewport.x,
+      radius * 2.0 / camera.viewport.y
     );
 
     splat_out.quad_size = quad_size;
-    splat_out.color = vec4<f32>(quad_size.x, quad_size.y, 0.0, 1.0);
-    // splat_out.color = vec3<f32>(1.0);
+    // splat_out.color = vec4<f32>(quad_size.x, quad_size.y, 0.0, 1.0);
+    let cam_pos = camera.view_inv[3].xyz;
+    let dir = normalize(pos.xyz - cam_pos);
+    splat_out.color = vec4<f32>(computeColorFromSH(dir, idx, render_settings.sh_deg), 1.0);
 
     let depth = 1.0 - ndc.z;
     splats[out_idx] = splat_out;
