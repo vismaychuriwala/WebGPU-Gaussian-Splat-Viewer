@@ -57,11 +57,9 @@ struct Gaussian {
 
 struct Splat {
     //TODO: store information for 2D splat rendering
-    centre_ndc: vec2<f32>,
-    radius_ndc: vec2<f32>,
+    centre_radius_ndc: array<u32,2>,
     color: vec4<f32>,
-    conic: vec3<f32>, // pixel-space conic coefficients
-    opacity: f32,
+    conic_opacity: array<u32,2>,
 };
 
 //TODO: bind your data here
@@ -262,7 +260,6 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
 
     let gaussian_scaling = render_settings.gaussian_scaling;
 
-    splat_out.centre_ndc = ndc;
     let out_idx = atomicAdd(&sort_infos.keys_size, 1u);
 
     if (out_idx >= arrayLength(&splats)) { return; }
@@ -274,20 +271,27 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     }
 
     let cov3D = computeCov3d(vertex.rot, vertex.scale, gaussian_scaling); // world space covariance
-    let cov2D = computeCov2D(pos.xyz, cov3D); // screen-space covariance
-    let conic = computeConic(cov2D); // pixel-space conic coefficients
-    let radius = computeRadius(cov2D); // pixel radius (3 sigma)
-    
-    splat_out.conic = conic;
-    splat_out.opacity = opacity;
+    let cov2D = computeCov2D(pos.xyz, cov3D);
+    let conic = computeConic(cov2D);
+    let radius = computeRadius(cov2D);
+    let conic_opacity: array<u32, 2> = array<u32, 2>(
+        pack2x16float(conic.xy),
+        pack2x16float(vec2(conic.z, opacity))
+    );
+    splat_out.conic_opacity = conic_opacity;
 
     let quad_size = vec2<f32>( // NDC half-extent per axis
       radius * 2.0 / camera.viewport.x,
       radius * 2.0 / camera.viewport.y
     );
 
-    splat_out.radius_ndc = quad_size;
-    // splat_out.color = vec4<f32>(quad_size.x, quad_size.y, 0.0, 1.0);
+    let centre_radius_ndc: array<u32, 2> = array<u32, 2>(
+        pack2x16float(ndc),
+        pack2x16float(quad_size)
+    );
+    
+    splat_out.centre_radius_ndc = centre_radius_ndc;
+
     let cam_pos = camera.view_inv[3].xyz;
     let dir = normalize(pos.xyz - cam_pos);
     splat_out.color = vec4<f32>(computeColorFromSH(dir, idx, render_settings.sh_deg), 1.0);

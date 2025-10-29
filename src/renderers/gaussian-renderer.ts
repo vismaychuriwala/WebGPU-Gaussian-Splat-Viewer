@@ -59,7 +59,7 @@ export default function get_renderer(
     drawArgsData
   );
 
-  const splatBufferSize = pc.num_points * 16 * Float32Array.BYTES_PER_ELEMENT;
+  const splatBufferSize = pc.num_points * 12 * Float32Array.BYTES_PER_ELEMENT;
   const splat_buffer = createBuffer(
     device,
     'gaussian splats',
