@@ -81,13 +81,13 @@ fn fs_main(
           + 2.0 * in.conic.y * d.x * d.y
           + in.conic.z * d.y * d.y);
 
-    if (power > 0.0) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    let weight = exp(power) * in.opacity;
+    if (weight < 1.0 / 255.0) {
+        // return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+        discard;
     }
-
-    let weight = exp(power);
-    return in.color * min(in.opacity * exp(power), 0.99);
-    let raw_alpha = weight * in.opacity * in.color.a;
+    // return in.color * min(in.opacity * exp(power), 0.99);
+    let raw_alpha = weight  * in.color.a;
     let alpha = sigmoid(raw_alpha * 6.0 - 3.0); // remap to emphasise mid-range opacity
     return vec4<f32>(in.color.rgb, alpha);
 }
