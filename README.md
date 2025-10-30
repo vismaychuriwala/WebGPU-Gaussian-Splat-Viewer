@@ -35,9 +35,7 @@ Try it yourself at [vismaychuriwala.github.io/WebGPU-Gaussian-Splat-Viewer](http
 
 ### Demo Video
 
-**[Click below to see it in action!](videos/splatting_demo_final.mp4)**
-
-[![Preview](images/img/bonsai.png)](videos/splatting_demo_final.mp4)
+https://github.com/user-attachments/assets/193cc355-4029-461c-aeb1-e8b5ea554344
 
 ## Project Overview
 
