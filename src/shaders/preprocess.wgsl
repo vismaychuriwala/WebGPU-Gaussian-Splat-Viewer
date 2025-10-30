@@ -56,10 +56,10 @@ struct Gaussian {
 };
 
 struct Splat {
-    //TODO: store information for 2D splat rendering
-    centre_radius_ndc: array<u32,2>,
+    // store information for 2D splat rendering
     color: vec4<f32>,
     conic_opacity: array<u32,2>,
+    centre_radius_ndc: array<u32,2>,
 };
 
 //TODO: bind your data here

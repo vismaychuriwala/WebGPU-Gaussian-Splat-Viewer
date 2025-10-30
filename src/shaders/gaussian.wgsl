@@ -6,11 +6,12 @@ struct VertexOutput {
     @location(2) opacity: f32,
     @location(3) center_ndc: vec2<f32>,
 };
+
 struct Splat {
-    //TODO: store information for 2D splat rendering
-    centre_radius_ndc: array<u32,2>,
+    // store information for 2D splat rendering
     color: vec4<f32>,
     conic_opacity: array<u32,2>,
+    centre_radius_ndc: array<u32,2>,
 };
 
 struct CameraUniforms {
@@ -75,7 +76,6 @@ fn vs_main(
 fn fs_main(
     in: VertexOutput,
 ) -> @location(0) vec4<f32> {
-    // return in.color;
 
     var frag_pos_ndc = (in.position.xy / camera.viewport) * 2.0 - 1.0;
     frag_pos_ndc.y *= -1.0;

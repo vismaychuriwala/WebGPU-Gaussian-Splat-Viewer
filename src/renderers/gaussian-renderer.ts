@@ -59,7 +59,7 @@ export default function get_renderer(
     drawArgsData
   );
 
-  const splatBufferSize = pc.num_points * 12 * Float32Array.BYTES_PER_ELEMENT;
+  const splatBufferSize = pc.num_points * 8 * Float32Array.BYTES_PER_ELEMENT;
   const splat_buffer = createBuffer(
     device,
     'gaussian splats',
@@ -181,7 +181,7 @@ export default function get_renderer(
   // ===============================================
   const render = (encoder: GPUCommandEncoder, texture_view: GPUTextureView) => {
     const pass = encoder.beginRenderPass({
-      label: 'point cloud render',
+      label: 'gaussian render',
       colorAttachments: [
         {
           view: texture_view,

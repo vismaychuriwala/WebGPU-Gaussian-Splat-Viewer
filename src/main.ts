@@ -19,7 +19,7 @@ import { assert } from './utils/util';
   }
   
   const device = await adapter.requestDevice({
-    requiredLimits: { 
+    requiredLimits: {
       maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize,
       maxStorageBufferBindingSize: adapter.limits. maxStorageBufferBindingSize
      },
